@@ -13,7 +13,7 @@ server.use(cors());
 server.use(express.json())
 
 const userSchema = joi.object({
-    nome: joi.string().required(),
+    name: joi.string().min(3).required().empty(""),
 })
 
 const messageSchema = joi.object({
@@ -47,7 +47,8 @@ server.post('/participants', async (req, res) => {
 
     try {
         const validateuser =  userSchema.validate({name:name});
-        if(!validateuser) {
+        console.log(validateuser);
+        if(validateuser.error) {
             res.status(422).send({message:"Digite um usuário válido"})
             return;
         }
@@ -167,5 +168,6 @@ setInterval(async () => {
         }
     } )
 }, 15000)
+
 
 server.listen(5000, console.log("Listening on port 5000"))
