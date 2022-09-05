@@ -1,75 +1,168 @@
 import  express, { json }  from "express";
 import cors from "cors";
+import { MongoClient } from "mongodb";
+import dotenv from 'dotenv'
 import dayjs from "dayjs";
+import joi from "joi"
+dotenv.config();
 
+
+const mongoClient = new MongoClient(process.env.MONGO_URI);
 const server = express();
 server.use(cors());
 server.use(express.json())
 
-let participant = ''
-const participants = [];
-const mensagens = [];
+const userSchema = joi.object({
+    nome: joi.string().required(),
+})
 
-server.post('/participants', (req, res) => {
-    const {nome} = req.body 
+const messageSchema = joi.object({
+    to: joi.string().required(),
+    type: joi.string().valid("message","private_message").required(),
+    text:joi.string().required()
+})
 
-    if(nome === '' || !nome) {
-        res.status(422).send({message:"Digite um usuário válido"})
+
+let db;
+
+mongoClient.connect().then(() => {
+    db = mongoClient.db("test")
+});
+
+server.post('/participants', async (req, res) => {
+    const {name} = req.body 
+    try {  
+        const partExist = await db.collection("participantes").findOne({
+        name:name
+    }).then(user => user);
+
+    if(partExist){
+        res.status(409).send(console.log(partExist))
         return;
+       }
+    } catch (error) {
+        console.log(error);
+        res.send("deu erro aí, maluco!")
     }
-   const partExist = participants.find((participant) => nome === participant.name);
 
-   if(partExist){
-    res.status(409).send({message: "Usuário já existente!"})
-    return;
-   }
-   participant = nome;
-   participants.push({name:nome,
+    try {
+        const validateuser =  userSchema.validate({name:name});
+        if(!validateuser) {
+            res.status(422).send({message:"Digite um usuário válido"})
+            return;
+        }
+    } catch(err){};
+    
+
+   db.collection("participantes").insertOne({name:name,
                     lastStatus:Date.now()
 })
-        res.status(201).send(console.log(participants));
+db.collection("mensagens").insertOne(
+    {from: name, to: 'Todos', text: 'entra na sala...', type: 'status', time: dayjs().format('HH:mm:ss')}  
+)
+        res.status(201).send("OK");
 })
 
 server.get('/participants', (req,res) => {
-    res.send(participants);
+    db.collection("participantes").find().toArray().then(users => {
+        res.send(users);
+    })
+
 })
 
-server.post('/messages', (req, res) => {
+server.post('/messages', async (req, res) => {
     const {to, text, type} = req.body;
     const {user:from} = req.headers;
 
-    if(to === '' || text === '') {
-        res.status(422).send({message: "Texto ou destinatário vazios!"})
-    return;
-    }
+    try {  
+        const partExist = await db.collection("participantes").findOne({
+        name:from
+    }).then(user => user);
 
-    if(type != 'message' && type != 'private_message') {
-        res.status(422).send({message: "Tipo da mensagem incorreta!"})
-    return;
-    }
-
-    const partExist = participants.find((participant) => from === participant.name);
     if(!partExist){
         res.status(422).send({message: "Usuário não cadastrado!"})
+        return;
+       }
+    } catch (error) {
+        console.log(error);
+        res.send("deu erro aí, maluco!")
     }
 
+    try {
+        const msgAproved = messageSchema.validate({to, text, type});
+        if(!msgAproved){
+            res.sendStatus(422)
+            console.log('deu errado')
+            return;
+            }
+            db.collection("mensagens").insertOne({
+                to, text, type, from,time:dayjs().format('HH:mm:ss')
+        })
+    } catch (error){
+        console.log(error);
+        res.sendStatus(500);
+    }
 
-    mensagens.push({to, text, type, from,time:dayjs()})    
-
-
-    res.status(201).send(mensagens);
+    res.status(201).send("OK");
 })
 
-server.get('/messages/:limit', (req, res) => {
-    const limit = req.params.limit;
+server.get('/messages', async (req, res) => {
+    const limit = parseInt(req.query.limit);
+    const { user } = req.headers;
 
     if(!limit){
-        res.send(mensagens)
+   const messages = await db.collection("mensagens").find().toArray();
+   const filteredMessages = messages.filter(mensagens => mensagens.from || mensagens.to === user || mensagens.type === "message");
+   res.send(filteredMessages);
+   return
+    }
+    db.collection("mensagens").find().toArray().then(mensagens => {
+        res.send(mensagens);
+    })
+    
+})
+
+
+server.post('/status', async (req, res) => {
+    const { user } = req.headers;
+
+    try {  
+        const partExist = await db.collection("participantes").findOne({
+        name:user
+    });
+
+    if(!partExist){
+        res.status(404).send({message: "Usuário não está logado!"})
         return;
+       }  db.collection("participantes").updateOne({name:user},{
+        $set: {
+            lastStatus:Date.now()
+        }
+    });
+    } 
+    
+    catch (error) {
+        console.log(error);
+        res.send("deu erro aí, maluco!")
     }
 
-    const mymessages = mensagens.filter((mensagem) => mensagem.from === participant || mensagem.to === participant)
-    res.send(mymessages)
+    res.status(200).send("ok")
 })
+
+setInterval(async () => {
+    const participantes = await db.collection("participantes").find().toArray();
+    const filteredParticipants = participantes.filter(participant => {
+        const soma = Date.now()  -  participant.lastStatus;
+        if(soma >= 10000 ) {
+            console.log("entrou no if")
+            db.collection("mensagens").insertOne(
+            {from: participant.name, to: 'Todos', text: 'sai da sala...', type: 'status', time: dayjs().format('HH:mm:ss') }
+            )
+            db.collection("participantes").deleteOne({name:participant.name})
+        } else {
+            console.log("entrou no else")
+        }
+    } )
+}, 15000)
 
 server.listen(5000, console.log("Listening on port 5000"))
