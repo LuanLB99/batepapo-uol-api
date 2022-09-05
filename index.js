@@ -112,13 +112,16 @@ server.get('/messages', async (req, res) => {
 
     if(!limit){
    const messages = await db.collection("mensagens").find().toArray();
-   const filteredMessages = messages.filter(mensagens => mensagens.from || mensagens.to === user || mensagens.type === "message");
+   console.log("entrou no if",user)
+   const filteredMessages = messages.filter(mensagens => mensagens.from === user || mensagens.to === user || mensagens.to === "Todos");
    res.send(filteredMessages);
    return
     }
-    db.collection("mensagens").find().toArray().then(mensagens => {
-        res.send(mensagens);
-    })
+    const messages = await db.collection("mensagens").find().toArray();
+    console.log("entrou no if",user)
+    const filteredMessages = messages.filter(mensagens => mensagens.from === user || mensagens.to === user || mensagens.to === "Todos");
+    res.send(filteredMessages.slice(-limit));
+    return
     
 })
 
@@ -154,11 +157,11 @@ setInterval(async () => {
     const filteredParticipants = participantes.filter(participant => {
         const soma = Date.now()  -  participant.lastStatus;
         if(soma >= 10000 ) {
-            console.log("entrou no if")
-            db.collection("mensagens").insertOne(
-            {from: participant.name, to: 'Todos', text: 'sai da sala...', type: 'status', time: dayjs().format('HH:mm:ss') }
-            )
-            db.collection("participantes").deleteOne({name:participant.name})
+            db.collection( "mensagens" ).insertOne(
+                { from : participant.name ,  to : 'Todos' ,  text : 'sai da sala...' , type : 'status' , time :dayjs( ).format( 'HH:mm:ss' )  }
+                )
+                db.collection( "participantes" ).deleteOne( { nome : participant.nome } )
+            
         } else {
             console.log("entrou no else")
         }
